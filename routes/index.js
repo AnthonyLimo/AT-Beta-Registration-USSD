@@ -11,11 +11,33 @@ Written by Anthony Kiplimo, 2020
 // Imports
 const express = require('express');
 const router = express.Router();
-const UssdBuilder = require('ussd-menu-bulder');
+const UssdMenu = require('ussd-menu-builder');
 const axios = require('axios');
-const session = require('./utils/session');
 
+let sessions = {};
 let menu = new UssdMenu();
+
+menu.sessionConfig({
+	start: (sessionId, callback) => {
+		//initialize session if session does not exist
+		//this is called by menu.run()
+		if(!(sessionId in sessions)) sessions[sessionId] = {};
+		//callback();
+	},
+	end: (sessionId, callback) => {
+		delete sessions[sessionId];
+		//callback()
+	},
+	set: (sessionId, key, value, callback) => {
+		sessions[sessionId][key] = value;
+		//calback()
+	},
+	get: (sessionId, key, callback) => {
+		//retrive value from current session
+		let value = sessions[sessionId][key];
+		//callback(null, value);
+	}
+});
 
 /*
 
@@ -69,6 +91,21 @@ We are always trying to improve the Masterclass experience. Thank you for provid
 */
 
 
+/*
+
+We can make sure that we check if the user has used the USSD and return the appropriate menu
+
+Idealy, we can show an END menu with "User already registered messsage" but this is dependent
+on the type of application that you're building.
+
+PS: We could aso store the string responses as Objects and calling specific configurations
+and displaying them. This provides better breakdown of code and file sizes are much less.
+
+>> Only use what you need
+
+*/
+
+
 // Initial state
 menu.startState({
 	run: () => {
@@ -99,16 +136,23 @@ menu.state('registerUser.fullName', {
 	run: () => {
 		//save user to firebase
 		let fullName = fullName;
+		menu.session.set('fullName', fullName, err => {
+			menu.go('registerUser');
+		});
 		menu.con('Please provide your email address:');
 	},
 	next: {
-		'*^\w+@[a-zA-Z_]+?\.[a-zA-Z]{2,3}$':'registerUser.end'
+		'*^\w+@[a-zA-Z_]+?\.[a-zA-Z]{2,3}$':'registerUser.emailAddress'
 	}
 });
 
 // Show final message to user on registration thread
-menu.state('registerUser.end', {
+menu.state('registerUser.emailAddress', {
 	run: () => {
+		let emailAddress = emailAddress;
+		menu.session.set('emailAddress', emailAddress, err => {
+			menu.go('registerUser.fullName');
+		});
 		menu.end('Thank you for registering for the Africas Talking Conversational API Beta .We will reach out to you with more details.');
 	}
 });
@@ -127,17 +171,16 @@ menu.state('randomMessage', {
 			"language_code":"en"
 			}
 			})
-		.then((response)=>{
-			console.log(response.content)
+		.then((resp)=>{
+			console.log(resp.content)
 			// response.content
 			// response.originator.name
+			menu.end(resp.content + '\n' + resp.originator.name);
 		})		
 		.catch((error)=>{
 			console.log(error)
+			menu.go('Something went wrong, please try again later.');
 		});
-	},
-	next: {
-
 	}
 });
 
@@ -147,55 +190,59 @@ menu.state('feedback', {
 		menu.con('On a scale of 1 to 5 (5 being awesome), how would you rate this session:\n');
 	},
 	next: {
-		'*^\s*[a-zA-Z,\s]+\s*$':'feedback.end'
+		'*^\s*[a-zA-Z,\s]+\s*$':'feedback.feedbackMessage'
 	}
 });
 
 // Final message to be shown
-menu.state('feedback.end', {
+menu.state('feedback.feedbackMessage', {
 	run: () => {
+		let feedbackMessage = feedbackMessage;
+		menu.session.set('feedbackMesssage', feedbackMessage, err => {
+			console.log(err);
+			menu.go('feedback');
+		});
 		menu.end('We are always trying to improve the Masterclass experience. Thank you for providing feedback.');
+		//save to db (Firebase) all the data from the session for this particular flow ~> Feedback Flow 
 	}
 });
 
 
 
 
+/*
 
-// Ignore and delete this code when you're done
+=================
+END OF USSD LOGIC
+=================
 
-menu.state('showBalance', {
-	run: () => {
-		fetchBalance(menu.args.phoneNumber).then(bal => {
-			menu.end('Your balance is ' + bal)
-		});
-	}
-});
+*/
 
-menu.state('buyAirtime', {
-	run: () => {
-		menu.con('Enter amount: ');
-	},
-	next: {
-		'*//d+':'buyAirtime.amount'
-	}
-});
 
-menu.state('buyAirtime.amount', {
-	run: () => {
-		buyAirtime(menu.args.phoneNumber, amount).then(res => {
-			menu.end('Airtime bought successfully');
-		});
-	}
-});
+/*
 
-/* GET home page. */
+======
+ROUTES
+======
+
+*/
+
 router.get('/', function(req, res, next) {
   res.render('index', { title: 'Express' });
 });
 
-router.post('/ussd', (req, res, next) => {
-	res.send(UssdBuilder)
+/*
+
+===================
+SETTING UP THE USSD
+===================
+
+*/
+
+router.post('/ussd', function(req, res) {
+	menu.run(req.body, ussdResult => {
+		res.send(ussdResult);
+	});
 });
 
 module.exports = router;
